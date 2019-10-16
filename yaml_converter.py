@@ -25,6 +25,7 @@ def getTenantName(config_json, config_keys):
 
     return tenant
 
+
 def getDefaultValues(config_json, config_keys):
     default_params = dict()
     volume = dict()
@@ -133,13 +134,12 @@ def getStacks(config_keys):
     stacks = []
     config_keys_list = list(config_keys)
     for key in config_keys_list:
-            #keys = key.replace("box.", "")
-            try:
-                stack_name = key.split(".")[1]
-                if stack_name != "defaults":
-                    stacks.append(stack_name)
-            except IndexError as error:
-                pass
+        try:
+            stack_name = key.split(".")[1]
+            if stack_name != "defaults":
+                stacks.append(stack_name)
+        except IndexError as error:
+            pass
     stacks = sorted(set(stacks))
     return stacks
 
@@ -150,24 +150,13 @@ def get_arguments():
         formatter_class=ArgumentDefaultsHelpFormatter)
 
     cmd_args.add_argument(
-        "--box", dest="box",
+        "-b", dest="box",
         help="path to box file", required=True)
     cmd_args.add_argument(
-        "--save", dest="save",
-        help="save to file", required=False, type=str2bool,
-        nargs='?', const=True, default=False)
+        "-s", dest="save", help="save to file",
+        required=False, action='store_true')
     return cmd_args
 
-
-def str2bool(string):
-    if isinstance(string, bool):
-       return string
-    if string.lower() in ('yes', 'true', 't', 'y', '1'):
-        return True
-    elif string.lower() in ('no', 'false', 'f', 'n', '0'):
-        return False
-    else:
-        raise ArgumentTypeError('Boolean value expected.')
 
 def main(ini_path, save):
     box_params_yaml = {}
@@ -185,12 +174,14 @@ def main(ini_path, save):
         stack_params = getStackValues(config_json, config_keys, stack)
         box_params_yaml.update(stack_params)
 
-    print(box_params_yaml)
-
-    if save :
+    if save:
         yaml_path = ini_path.split('.')[0] + ".yaml"
         yaml_stream = file(yaml_path, 'w')
-        yaml.dump(box_params_yaml, yaml_stream, default_flow_style=False)
+        yaml.dump(
+            box_params_yaml, yaml_stream, default_flow_style=False,
+            explicit_start=True, indent=2)
+    else:
+        print(box_params_yaml)
 
 
 if __name__ == '__main__':
