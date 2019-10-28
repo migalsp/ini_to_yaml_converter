@@ -1,9 +1,8 @@
 #!/usr/bin/python
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter, ArgumentTypeError
 from configobj import ConfigObj
-import yaml
-import json
 import sys
+# import yaml
 
 
 def getTenantName(config_json, config_keys):
@@ -37,25 +36,24 @@ def getDefaultValues(config_json, config_keys):
             keys = key.replace("box.defaults.", "")
             for key_item in keys.split('.'):
                 default_params.update({key_item: config_json.get(key)})
-# TODO: Remove Dynamic volumes for defaults
         elif key.find("defaults") != -1 and key.find("volume") != -1:
-            keys = key.replace("box.defaults.", "")
-            current_key = keys.split(".")[0]
+            volume_key = "volume1"
 
             for item in config_keys_list:
-                if item.find("defaults") != -1 and item.find(current_key) != -1:
-                    volume_params = key.replace("box.defaults." + current_key + ".", "")
+                if item.find("defaults") != -1 and item.find(volume_key) != -1:
+                    volume_params = key.replace(
+                        "box.defaults." + volume_key + ".", "")
                     try:
-                        volume[current_key].update({volume_params: config_json.get(key)})
+                        volume.update({volume_params: config_json.get(key)})
                     except KeyError:
-                        volume[current_key] = {}
-                        volume[current_key].update(
+                        volume = {}
+                        volume.update(
                             {volume_params: config_json.get(key)})
 
     default = dict(
         defaults=dict(
             default_params,
-            volumes=dict(
+            volume=dict(
                 volume
             )
         ))
@@ -67,13 +65,27 @@ def getStackValues(config_json, config_keys, stack_name):
     instance = dict()
     stack_values = {}
     nodes_params_list = []
+    vips_params_list = []
+    image_replace = ""
 
     for key in config_keys_list:
+        if len(key.split(".")) > 1 and key.split(".")[1] != stack_name:
+            continue
 
-        if key.find(stack_name) != -1 and key.find("volume") == -1:
+        if key.find("volume") == -1:
             keys = key.replace("box." + stack_name + ".", "")
+
+            if keys.split(".")[0] == "vip":
+                vips_params_list.append(
+                    {'name': keys.split(".")[1], 'ip': config_json.get(key)})
+                continue
+
+            if keys.split(".")[0] == "image_replace":
+                image_replace = config_json.get(key)
+                continue
+
             instance_num = keys.split(".")[0]
-            node_name_key = key.replace("box." + stack_name + "." + instance_num + "." , "")
+            node_name_key = key.replace("box." + stack_name + "." + instance_num + ".", "")
             node_name = node_name_key.split('.')[0]
 
             for item in config_keys_list:
@@ -86,12 +98,18 @@ def getStackValues(config_json, config_keys, stack_name):
                         if "nodename" not in instance[node_name]:
                             instance[node_name]['nodename'] = {}
                             instance[node_name]['nodename'] = node_name
+                        if "nodenum" not in instance[node_name]:
+                            instance[node_name]['nodenum'] = {}
+                            instance[node_name]['nodenum'] = instance_num
+                        if image_replace != "" and "image_replace" not in instance[node_name]:
+                            instance[node_name]['image_replace'] = {}
+                            instance[node_name]['image_replace'] = image_replace
                     except KeyError:
                         instance[node_name] = {}
                         instance[node_name].update(
                             {instance_params: config_json.get(key)})
 
-        elif key.find(stack_name) != -1 and key.find("volume") != -1:
+        elif key.find("volume") != -1:
             instance_key = key.replace("box." + stack_name + ".", "")
             instance_num = instance_key.split(".")[0]
             node_name_key = key.replace(
@@ -125,7 +143,23 @@ def getStackValues(config_json, config_keys, stack_name):
         if stack_values[stack_name][node_name]['nodename'] == node_name:
             nodes_params_list.append(stack_values[stack_name][node_name])
 
-    stack_values[stack_name] = nodes_params_list
+    stack_values[stack_name] = {}
+    if vips_params_list:
+        stack_values[stack_name]['vip'] = vips_params_list
+    stack_values[stack_name]['nodes'] = nodes_params_list
+
+    for node_name in stack_values[stack_name]['nodes']:
+        volumes_params_list = []
+        if 'volumes' in node_name:
+            node_volumes = list(node_name['volumes'])
+            for volume in node_volumes:
+                volume_params_dict = {}
+                volume_params_dict.update({'name': volume})
+                volume_params_dict.update(node_name['volumes'][volume])
+                volumes_params_list.append(volume_params_dict)
+            stack_values[
+                stack_name]['nodes'][stack_values[stack_name][
+                    'nodes'].index(node_name)]['volumes'] = volumes_params_list
 
     return stack_values
 
