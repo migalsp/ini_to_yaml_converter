@@ -1,9 +1,13 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter, ArgumentTypeError
 from configobj import ConfigObj
 import sys
-# import yaml
+import os
+import yaml
 
+class MyDumper(yaml.Dumper):
+    def increase_indent(self, flow=False, indentless=False):
+        return super(MyDumper, self).increase_indent(flow, False)
 
 def getTenantName(config_json, config_keys):
     tenant = dict()
@@ -93,21 +97,22 @@ def getStackValues(config_json, config_keys, stack_name):
                     instance_params = key.replace(
                         "box." + stack_name + "." + instance_num + "." + node_name + ".", "")
                     try:
-                        instance[node_name].update(
+                        instance[instance_num].update(
                             {instance_params: config_json.get(key)})
-                        if "nodename" not in instance[node_name]:
-                            instance[node_name]['nodename'] = {}
-                            instance[node_name]['nodename'] = node_name
-                        if "nodenum" not in instance[node_name]:
-                            instance[node_name]['nodenum'] = {}
-                            instance[node_name]['nodenum'] = instance_num
-                        if image_replace != "" and "image_replace" not in instance[node_name]:
-                            instance[node_name]['image_replace'] = {}
-                            instance[node_name]['image_replace'] = image_replace
                     except KeyError:
-                        instance[node_name] = {}
-                        instance[node_name].update(
+                        instance[instance_num] = {}
+                        instance[instance_num].update(
                             {instance_params: config_json.get(key)})
+
+                    if "nodename" not in instance[instance_num]:
+                        instance[instance_num]['nodename'] = {}
+                        instance[instance_num]['nodename'] = node_name
+                    if "name" not in instance[instance_num]:
+                        instance[instance_num]['name'] = {}
+                        instance[instance_num]['name'] = instance_num
+                    if image_replace != "" and "image_replace" not in instance[instance_num]:
+                        instance[instance_num]['image_replace'] = {}
+                        instance[instance_num]['image_replace'] = image_replace
 
         elif key.find("volume") != -1:
             instance_key = key.replace("box." + stack_name + ".", "")
@@ -124,15 +129,15 @@ def getStackValues(config_json, config_keys, stack_name):
                     instance_params = key.replace(
                         "box." + stack_name + "." + instance_num + "." + node_name + "." + node_volume + ".", "")
                     try:
-                        instance[node_name]['volumes'][node_volume].update(
+                        instance[instance_num]['volumes'][node_volume].update(
                             {instance_params: config_json.get(key)})
                     except KeyError:
-                        if node_name not in instance:
-                            instance[node_name] = {}
-                        if "volumes" not in instance[node_name]:
-                            instance[node_name]['volumes'] = {}
-                        instance[node_name]['volumes'][node_volume] = {}
-                        instance[node_name]['volumes'][node_volume].update(
+                        if instance_num not in instance:
+                            instance[instance_num] = {}
+                        if "volumes" not in instance[instance_num]:
+                            instance[instance_num]['volumes'] = {}
+                        instance[instance_num]['volumes'][node_volume] = {}
+                        instance[instance_num]['volumes'][node_volume].update(
                             {instance_params: config_json.get(key)})
 
     stack_values[stack_name] = {}
@@ -140,7 +145,7 @@ def getStackValues(config_json, config_keys, stack_name):
     nodes = list(stack_values[stack_name].keys())
 
     for node_name in nodes:
-        if stack_values[stack_name][node_name]['nodename'] == node_name:
+        if stack_values[stack_name][node_name]['name'] == node_name:
             nodes_params_list.append(stack_values[stack_name][node_name])
 
     stack_values[stack_name] = {}
@@ -161,6 +166,55 @@ def getStackValues(config_json, config_keys, stack_name):
                 stack_name]['nodes'][stack_values[stack_name][
                     'nodes'].index(node_name)]['volumes'] = volumes_params_list
 
+# fix bug when the additional parameter has 1 value and converting it to list
+    for node in stack_values[stack_name]['nodes']:
+        additional_internal_networks = []
+        additional_internal_networks_names = []
+        additional_internal_networks_ips = []
+
+        if 'additional_internal_networks_names' in node:
+            if type(node['additional_internal_networks_names']) is str:
+                additional_internal_networks_names.append(
+                    node['additional_internal_networks_names'])
+
+                stack_values[stack_name]['nodes'][stack_values[stack_name][
+                    'nodes'].index(node)][
+                        'additional_internal_networks_names'] = additional_internal_networks_names
+
+        if 'additional_internal_networks_ips' in node:
+            if type(node['additional_internal_networks_ips']) is str:
+                additional_internal_networks_ips.append(
+                    node['additional_internal_networks_ips'])
+
+                stack_values[stack_name]['nodes'][stack_values[stack_name][
+                    'nodes'].index(node)][
+                        'additional_internal_networks_ips'] = additional_internal_networks_ips
+
+        if ('additional_internal_networks_names' in node) and (
+                'additional_internal_networks_ips' in node):
+            try:
+                for additional_net_name in node['additional_internal_networks_names']:
+                    additional_internal_networks.append({'name': additional_net_name})
+
+                for additional_internal_network in additional_internal_networks:
+                    additional_internal_network_index = additional_internal_networks.index(
+                        additional_internal_network)
+                    additional_internal_network.update(
+                        {'ip': node['additional_internal_networks_ips'][additional_internal_network_index]})
+
+                stack_values[stack_name]['nodes'][stack_values[stack_name][
+                    'nodes'].index(node)]['additional_internal_networks'] = additional_internal_networks
+                stack_values[stack_name]['nodes'][stack_values[stack_name][
+                    'nodes'].index(node)].pop('additional_internal_networks_names')
+                stack_values[stack_name]['nodes'][stack_values[stack_name][
+                    'nodes'].index(node)].pop('additional_internal_networks_ips')
+            except Exception:
+                sys.exit('Please, check additional_internal_networks_names or '
+                         'additional_internal_networks_ips fields in stack '
+                         '"%s" node "%s". One of these fields has one value '
+                         'and the second 2.' % (stack_name, node['name']))
+
+    stack_values[stack_name]['nodes'] = sorted(stack_values[stack_name]['nodes'], key = lambda i: int(i['name']))
     return stack_values
 
 
@@ -188,7 +242,7 @@ def get_arguments():
         help="path to box file", required=True)
     cmd_args.add_argument(
         "-s", dest="save", help="save to file",
-        required=False, action='store_true')
+        required=False, const="box_file", nargs='?')
     return cmd_args
 
 
@@ -209,11 +263,24 @@ def main(ini_path, save):
         box_params_yaml.update(stack_params)
 
     if save:
-        yaml_path = ini_path.split('.')[0] + ".yaml"
-        yaml_stream = file(yaml_path, 'w')
+        if save == "box_file":
+            if ini_path.split('.')[-1] != ".yaml":
+                yaml_box_path = ini_path + '.yaml'
+            else:
+                yaml_box_path = ini_path
+        else:
+            yaml_box_path = save
+
+        yaml_stream = file(yaml_box_path, 'w')
         yaml.dump(
-            box_params_yaml, yaml_stream, default_flow_style=False,
-            explicit_start=True, indent=2)
+            box_params_yaml,
+            yaml_stream,
+            default_flow_style=False,
+            explicit_start=True,
+            indent=2,
+            Dumper=MyDumper)
+
+        print ("Yaml box file saved to: " + yaml_box_path)
     else:
         print(box_params_yaml)
 
